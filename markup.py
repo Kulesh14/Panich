@@ -12,3 +12,5 @@ basicMarkup.row(btn01)
 basicMarkup.row(btn02)
 basicMarkup.row(btn03)
 basicMarkup.row(btn04, btn05)
+
+hide_keyboard = types.ReplyKeyboardRemove()

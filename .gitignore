@@ -2,3 +2,4 @@ group.db
 config.py
 groupmates.csv
 __pycache__
+timetable.json
