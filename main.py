@@ -5,7 +5,7 @@ import pandas as pd
 from config import TOKEN, HIGH_ACCESS, SKIP_REASONS
 from markup import basicMarkup, hide_keyboard
 from sus import get_id_hash, encrypt_value, decrypt_value
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 bot = telebot.TeleBot(TOKEN)
@@ -29,6 +29,13 @@ def createTable():
     for i in range(len(df)):
         addingGroupmate(df.iloc[i, 0], df.iloc[i, 1], df.iloc[i, 2])
 
+
+def getSurname(idy):
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM groupmates WHERE id = ?", (idy, ))
+    listikSur = cur.fetchall()
+    cur.close()
+    return decrypt_value(listikSur[0][0])
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -144,11 +151,129 @@ def regReason(message, idy, finDate, dayOfWeek, para):
 
 
 def skipDay(message, idy):
-    bot.send_message(message.chat.id, "Запись про день добавлена", reply_markup=basicMarkup)
+    bot.send_message(message.chat.id, "Введи дату в формате: ДД.ММ", reply_markup=hide_keyboard)
+    bot.register_next_step_handler(message, regDate2, idy)
+
+
+def regDate2(message, idy, finDate=None, dayOfWeek=None):
+    if finDate is None:
+        try:
+            date_obj = datetime.strptime(f"2026.{message.text}", "%Y.%d.%m")
+        except Exception:
+            bot.send_message(message.chat.id, "Правильно введи дату!")
+            skipDay(message, idy)
+            return
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        now_moscow = datetime.now(moscow_tz)
+        today = now_moscow.replace(year=2026, hour=0, minute=0, second=0, microsecond=0)
+        end_of_year = datetime(year=2026, month=12, day=31, tzinfo=moscow_tz)
+        user_date = date_obj.replace(year=2026, tzinfo=moscow_tz)
+        dayOfWeek = date_obj.weekday()
+        if not (today <= user_date <= end_of_year) or dayOfWeek == 6:
+            bot.send_message(message.chat.id, "Дата в недопустимом диапазоне или это воскресенье!")
+            skipDay(message, idy)
+            return
+        finDate = date_obj.strftime("%m-%d")
+
+    reasonMarkup = telebot.types.ReplyKeyboardMarkup()
+    for paraT in SKIP_REASONS:
+        btncur = telebot.types.KeyboardButton(paraT)
+        reasonMarkup.row(btncur)
+    bot.send_message(message.chat.id, "Выбери причину", reply_markup=reasonMarkup)
+    bot.register_next_step_handler(message, regReason2, idy, finDate, dayOfWeek)
+
+
+def regReason2(message, idy, finDate, dayOfWeek):
+    if message.text not in SKIP_REASONS:
+        bot.send_message(message.chat.id, "Ну ты тыкни в кнопку!")
+        regDate2(message, idy, finDate, dayOfWeek)
+        return
+    reason = SKIP_REASONS.index(message.text)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM skips WHERE idPerson = ? AND date = ? AND para = ?", (idy, finDate, 0))
+    listikExisting = cur.fetchall()
+    if len(listikExisting) != 0:
+        bot.send_message(message.chat.id, "Запись про день уже была добавлена", reply_markup=basicMarkup)
+    else:
+        cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
+        conn.commit()
+        cur.execute('INSERT INTO skips (idPerson, date, para, reason) VALUES(?, ?, ?, ?)', (idy, finDate, 0, reason))
+        conn.commit()
+        bot.send_message(message.chat.id, "Запись про день добавлена", reply_markup=basicMarkup)
+    cur.close()
 
 
 def skipPeriod(message, idy):
-    bot.send_message(message.chat.id, "Запись про период добавлена", reply_markup=basicMarkup)
+    bot.send_message(message.chat.id, "Введи период в формате: ДД.ММ-ДД.ММ", reply_markup=hide_keyboard)
+    bot.register_next_step_handler(message, regDate3, idy)
+
+
+def regDate3(message, idy, finDate1=None, finDate2=None):
+    if finDate1 is None:
+        listikDates = message.text.split('-')
+        if len(listikDates) != 2:
+            bot.send_message(message.chat.id, "Правильно введи дату!")
+            skipPeriod(message, idy)
+            return
+        try:
+            date_obj1 = datetime.strptime(f"2026.{listikDates[0]}", "%Y.%d.%m")
+            date_obj2 = datetime.strptime(f"2026.{listikDates[1]}", "%Y.%d.%m")
+        except Exception:
+            bot.send_message(message.chat.id, "Правильно введи дату!")
+            skipPeriod(message, idy)
+            return
+        if date_obj1 >= date_obj2:
+            bot.send_message(message.chat.id, "Период представляет собой один день либо порядок неправильный!")
+            skipPeriod(message, idy)
+            return
+        moscow_tz = ZoneInfo("Europe/Moscow")
+        now_moscow = datetime.now(moscow_tz)
+        today = now_moscow.replace(year=2026, hour=0, minute=0, second=0, microsecond=0)
+        end_of_year = datetime(year=2026, month=12, day=31, tzinfo=moscow_tz)
+        user_date1 = date_obj1.replace(year=2026, tzinfo=moscow_tz)
+        user_date2 = date_obj2.replace(year=2026, tzinfo=moscow_tz)
+        if not (today <= user_date1 <= end_of_year):
+            bot.send_message(message.chat.id, "Дата в недопустимом диапазоне!")
+            skipPeriod(message, idy)
+            return
+        finDate1 = date_obj1.strftime("%m-%d")
+        finDate2 = date_obj2.strftime("%m-%d")
+
+    reasonMarkup = telebot.types.ReplyKeyboardMarkup()
+    for paraT in SKIP_REASONS:
+        btncur = telebot.types.KeyboardButton(paraT)
+        reasonMarkup.row(btncur)
+    bot.send_message(message.chat.id, "Выбери причину", reply_markup=reasonMarkup)
+    bot.register_next_step_handler(message, regReason3, idy, finDate1, finDate2)
+
+
+def regReason3(message, idy, finDate1, finDate2):
+    if message.text not in SKIP_REASONS:
+        bot.send_message(message.chat.id, "Ну ты тыкни в кнопку!")
+        regDate3(message, idy, finDate1, finDate2)
+        return
+    reason = SKIP_REASONS.index(message.text)
+
+    start_date = datetime.strptime(f"2026-{finDate1}", "%Y-%m-%d")
+    end_date = datetime.strptime(f"2026-{finDate2}", "%Y-%m-%d")
+    days_diff = (end_date - start_date).days + 1
+
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM skips WHERE idPerson = ? AND ? <= date AND date <= ? AND para = ?", (idy, finDate1, finDate2, 0))
+    listikExisting = cur.fetchall()
+    if len(listikExisting) == days_diff:
+        bot.send_message(message.chat.id, "Запись про этот период уже была добавлена", reply_markup=basicMarkup)
+    else:
+        current_date = start_date
+        while current_date <= end_date:
+            finDate = current_date.strftime("%m-%d")
+            current_date += timedelta(days=1)
+            cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
+            conn.commit()
+            cur.execute('INSERT INTO skips (idPerson, date, para, reason) VALUES(?, ?, ?, ?)', (idy, finDate, 0, reason))
+            conn.commit()
+        bot.send_message(message.chat.id, "Запись про период добавлена", reply_markup=basicMarkup)
+        cur.close()
 
 
 def statistics(message, idy):
@@ -157,9 +282,50 @@ def statistics(message, idy):
     nicky = decrypt_value(cur.fetchall()[0][0])
     cur.close()
     if nicky in HIGH_ACCESS:
-        bot.send_message(message.chat.id, "У вас есть доступ к статистике", reply_markup=basicMarkup)
-    else:
-        bot.send_message(message.chat.id, "У вас нет доступа к статистике", reply_markup=basicMarkup)
+        bot.send_message(message.chat.id, "Введи дату в формате: ДД.ММ", reply_markup=hide_keyboard)
+        bot.register_next_step_handler(message, regDate4, idy)
+
+
+def regDate4(message, idy):
+    try:
+        date_obj = datetime.strptime(f"2026.{message.text}", "%Y.%d.%m")
+    except Exception:
+        bot.send_message(message.chat.id, "Правильно введи дату!")
+        statistics(message, idy)
+        return
+    moscow_tz = ZoneInfo("Europe/Moscow")
+    start_of_year = datetime(year=2026, month=9, day=1, tzinfo=moscow_tz)
+    end_of_year = datetime(year=2026, month=12, day=31, tzinfo=moscow_tz)
+    user_date = date_obj.replace(year=2026, tzinfo=moscow_tz)
+    dayOfWeek = date_obj.weekday()
+    if not (start_of_year <= user_date <= end_of_year) or dayOfWeek == 6:
+        bot.send_message(message.chat.id, "Дата в недопустимом диапазоне или это воскресенье!")
+        statistics(message, idy)
+        return
+    finDate = date_obj.strftime("%m-%d")
+    with open("timetable.json", "r", encoding="utf-8") as file:
+        timetable = json.load(file)
+    daysPary = timetable[str(dayOfWeek)]
+    textStat = f"{finDate}\n"
+    cur = conn.cursor()
+    cur.execute("SELECT idPerson, reason FROM skips WHERE date = ? AND para = ?", (finDate, 0))
+    listikPeople = cur.fetchall()
+    textStat += "Весь день:\n"
+    if len(listikPeople) == 0:
+        textStat += "-\n"
+    for i in range(len(listikPeople)):
+        textStat += f"{getSurname(listikPeople[i][0])} - {SKIP_REASONS[listikPeople[i][1]]}\n"
+
+    for klych in list(daysPary.keys()):
+        textStat += daysPary[klych] + "\n"
+        cur.execute("SELECT idPerson, reason FROM skips WHERE date = ? AND para = ?", (finDate, int(klych)))
+        listikPeople = cur.fetchall()
+        if len(listikPeople) == 0:
+            textStat += "-\n"
+        for i in range(len(listikPeople)):
+            textStat += f"{getSurname(listikPeople[i][0])} - {SKIP_REASONS[listikPeople[i][1]]}\n"
+    cur.close()
+    bot.send_message(message.chat.id, textStat, reply_markup=basicMarkup)
 
 
 def advertisment(message):
