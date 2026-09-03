@@ -13,7 +13,7 @@ conn = sqlite3.connect('group.db', check_same_thread=False)
 
 def addingGroupmate(name, sur, nick):
     cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS groupmates (id INTEGER PRIMARY KEY, name TEXT, surname TEXT, nick TEXT, userID_enc TEXT, userID_hash TEXT, points int)")
+    cur.execute("CREATE TABLE IF NOT EXISTS groupmates (id INTEGER PRIMARY KEY, name TEXT, surname TEXT, nick TEXT, userID_enc TEXT, userID_hash TEXT, points int, date DATETIME)")
     conn.commit()
     nameTable = encrypt_value(name)
     surTable = encrypt_value(sur)
@@ -43,12 +43,49 @@ def start(message):
     nick = message.chat.username
     cur.execute("SELECT id, nick FROM groupmates WHERE userID_hash IS NULL")
     listikOfFreeNicks = cur.fetchall()
+    cur.close()
     for i in range(len(listikOfFreeNicks)):
         if nick == decrypt_value(listikOfFreeNicks[i][1]):
-            cur.execute("UPDATE groupmates SET userID_enc = ?, userID_hash = ? WHERE id = ?", (encrypt_value(str(message.chat.id)), get_id_hash(str(message.chat.id)), listikOfFreeNicks[i][0]))
-            conn.commit()
-            bot.send_message(message.chat.id, "Вы успешно зарегистрированы!", reply_markup=basicMarkup)
+            texty = (
+                "🔒 **Безопасность и конфиденциальность**\n\n"
+                "Наш бот заботится о вашей безопасности. Все ваши персональные данные "
+                "(имя, фамилия, никнейм) **автоматически шифруются** при записи в базу данных. "
+                "Мы не храним личную информацию в открытом виде и строго соблюдаем "
+                "законодательство Республики Беларусь.\n\n"
+                "Нажимая кнопку ниже, вы даете свободное и однозначное согласие на обработку "
+                "ваших данных для обеспечения работы бота.\n\n"
+                f"📄 Ознакомиться с правилами: [Политика конфиденциальности]"
+            )
+            markupT = telebot.types.InlineKeyboardMarkup()
+            btn_agree = telebot.types.InlineKeyboardButton(
+                text="Согласен и хочу продолжить", 
+                callback_data=f"agree_privacy:{listikOfFreeNicks[i][0]}"
+            )
+            markupT.add(btn_agree)
+            try:
+                with open('Privacy_Policy.pdf', 'rb') as file:
+                    bot.send_document(
+                        chat_id=message.chat.id, 
+                        document=file, 
+                        caption=texty, 
+                        parse_mode='Markdown', 
+                        reply_markup=markupT
+                    )
+            except FileNotFoundError:
+                bot.send_message(message.chat.id, "Ошибка: Файл политики не найден. Обратитесь к администратору.")
             break
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("agree_privacy:"))
+def callback_agree(call):  
+    data_parts = call.data.split(':')
+    idy = data_parts[1]
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=None)
+    cur = conn.cursor()
+    cur.execute("UPDATE groupmates SET userID_enc = ?, userID_hash = ?, date = ? WHERE id = ?", (encrypt_value(str(call.message.chat.id)), get_id_hash(str(call.message.chat.id)), current_time, idy))
+    conn.commit()
+    bot.send_message(call.message.chat.id, "Вы успешно зарегистрированы!", reply_markup=basicMarkup)
     cur.close()
 
 
@@ -72,6 +109,10 @@ def anyMess(message):
         statistics(message, idishnik)
     elif message.text in ['Реклама']:
         advertisment(message)
+    elif message.text in ['Отменить']:
+        deletePeriod(message, idishnik)
+    elif message.text in ['Личная статистика']:
+        personStat(message, idishnik)
     else:
         boobs(message)
 
@@ -335,6 +376,77 @@ def advertisment(message):
     bot.send_message(message.chat.id, "Снизу кнопка для перехода", reply_markup=markup)
     bot.send_message(message.chat.id, "Ну давай, рассказывай, когда тебя не будет", reply_markup=basicMarkup)
 
+
+def deletePeriod(message, idy):
+    bot.send_message(message.chat.id, "Введи период (если один день, то 2ю дату продублировать) в формате: ДД.ММ-ДД.ММ", reply_markup=hide_keyboard)
+    bot.register_next_step_handler(message, regDate5, idy)
+
+
+def regDate5(message, idy):
+    listikDates = message.text.split('-')
+    if len(listikDates) != 2:
+        bot.send_message(message.chat.id, "Правильно введи дату!")
+        deletePeriod(message, idy)
+        return
+    try:
+        date_obj1 = datetime.strptime(f"2026.{listikDates[0]}", "%Y.%d.%m")
+        date_obj2 = datetime.strptime(f"2026.{listikDates[1]}", "%Y.%d.%m")
+    except Exception:
+        bot.send_message(message.chat.id, "Правильно введи дату!")
+        deletePeriod(message, idy)
+        return
+    if date_obj1 > date_obj2:
+        bot.send_message(message.chat.id, "Порядок неправильный!")
+        deletePeriod(message, idy)
+        return
+    moscow_tz = ZoneInfo("Europe/Moscow")
+    now_moscow = datetime.now(moscow_tz)
+    today = now_moscow.replace(year=2026, hour=0, minute=0, second=0, microsecond=0)
+    end_of_year = datetime(year=2026, month=12, day=31, tzinfo=moscow_tz)
+    user_date1 = date_obj1.replace(year=2026, tzinfo=moscow_tz)
+    user_date2 = date_obj2.replace(year=2026, tzinfo=moscow_tz)
+    if not (today <= user_date1 <= end_of_year):
+        bot.send_message(message.chat.id, "Дата в недопустимом диапазоне!")
+        deletePeriod(message, idy)
+        return
+    finDate1 = date_obj1.strftime("%m-%d")
+    finDate2 = date_obj2.strftime("%m-%d")
+
+    start_date = datetime.strptime(f"2026-{finDate1}", "%Y-%m-%d")
+    end_date = datetime.strptime(f"2026-{finDate2}", "%Y-%m-%d")
+
+    cur = conn.cursor()
+    current_date = start_date
+    while current_date <= end_date:
+        finDate = current_date.strftime("%m-%d")
+        current_date += timedelta(days=1)
+        cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
+        conn.commit()
+    bot.send_message(message.chat.id, "Записи в этом периоде удалены", reply_markup=basicMarkup)
+    cur.close()
+
+
+def personStat(message, idy):
+    cur = conn.cursor()
+    cur.execute("SELECT date, para FROM skips WHERE idPerson = ? ORDER BY date", (idy, ))
+    listikSkipov = cur.fetchall()
+    cur.close()
+    texty = "Даты указаны в формате ММ-ДД\n"
+    listikPar = []
+    for i in range(len(listikSkipov)):
+        para = str(listikSkipov[i][1])
+        if para == "0":
+            texty += f"{listikSkipov[i][0]}: все\n"
+        else:
+            listikPar.append(para)
+            if i != len(listikSkipov) - 1:
+                if listikSkipov[i][0] != listikSkipov[i + 1][0]:
+                    texty += f"{listikSkipov[i][0]}: " + ",".join(listikPar) + '\n'
+                    listikPar = []
+            else:
+                texty += f"{listikSkipov[i][0]}: " + ",".join(listikPar) + '\n'
+                listikPar = []
+    bot.send_message(message.chat.id, texty, reply_markup=basicMarkup)
 
 def boobs(message):
     with open("image.png", "rb") as photo:
