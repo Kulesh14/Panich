@@ -427,8 +427,10 @@ def regDate4(message, idy):
 def advertisment(message):
     markup = telebot.types.InlineKeyboardMarkup()
     btn1 = telebot.types.InlineKeyboardButton('Перейти на Рыфмач', url="https://ryfmach.by/")
+    btn2 = telebot.types.InlineKeyboardButton('Вучыць беларускую', url="https://t.me/tsiotachkabot")
     markup.add(btn1)
-    bot.send_message(message.chat.id, "Снизу кнопка для перехода", reply_markup=markup)
+    markup.add(btn2)
+    bot.send_message(message.chat.id, "Снизу кнопки для перехода", reply_markup=markup)
     bot.send_message(message.chat.id, "Ну давай, рассказывай, когда тебя не будет", reply_markup=basicMarkup)
 
 
