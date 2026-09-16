@@ -113,6 +113,10 @@ def anyMess(message):
         deletePeriod(message, idishnik)
     elif message.text in ['Личная статистика']:
         personStat(message, idishnik)
+    elif message.text in ['Начислить баллы']:
+        pointsAdding(message, idishnik)
+    elif message.text in ['Социальное положение']:
+        socialRating(message)
     else:
         boobs(message)
 
@@ -186,6 +190,11 @@ def regReason(message, idy, finDate, dayOfWeek, para):
     else:
         cur.execute('INSERT INTO skips (idPerson, date, para, reason) VALUES(?, ?, ?, ?)', (idy, finDate, para, reason))
         conn.commit()
+        if reason == 5:
+            cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+            bally = cur.fetchall()[0][0] - 5
+            cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+            conn.commit()
         bot.send_message(message.chat.id, "Запись про пару добавлена", reply_markup=basicMarkup)
     cur.close()
 
@@ -236,10 +245,26 @@ def regReason2(message, idy, finDate, dayOfWeek):
     if len(listikExisting) != 0:
         bot.send_message(message.chat.id, "Запись про день уже была добавлена", reply_markup=basicMarkup)
     else:
+        cur.execute('SELECT id FROM skips WHERE idPerson = ? AND date = ? AND reason = ?', (idy, finDate, 5))
+        ballyBack = len(cur.fetchall())
         cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
         conn.commit()
         cur.execute('INSERT INTO skips (idPerson, date, para, reason) VALUES(?, ?, ?, ?)', (idy, finDate, 0, reason))
         conn.commit()
+        if reason == 5:
+            with open("timetable.json", "r", encoding="utf-8") as file:
+                timetable = json.load(file)
+            daysPary = timetable[str(dayOfWeek)]
+            ballyMinus = len(list(daysPary.values()))
+            cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+            bally = cur.fetchall()[0][0] + (ballyBack * 5) - (ballyMinus * 5)
+            cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+            conn.commit()
+        else:
+            cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+            bally = cur.fetchall()[0][0] + (ballyBack * 5)
+            cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+            conn.commit()
         bot.send_message(message.chat.id, "Запись про день добавлена", reply_markup=basicMarkup)
     cur.close()
 
@@ -308,11 +333,41 @@ def regReason3(message, idy, finDate1, finDate2):
         current_date = start_date
         while current_date <= end_date:
             finDate = current_date.strftime("%m-%d")
+            dayOfWeek = current_date.weekday()
             current_date += timedelta(days=1)
+            cur.execute('SELECT id FROM skips WHERE idPerson = ? AND date = ? AND reason = ? AND para = ?', (idy, finDate, 5, 0))
+            ballyBack = len(cur.fetchall())
+            if ballyBack != 0:
+                ballyBack = -1
+            else:
+                cur.execute('SELECT id FROM skips WHERE idPerson = ? AND date = ? AND reason = ?', (idy, finDate, 5))
+                ballyBack = len(cur.fetchall())
             cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
             conn.commit()
             cur.execute('INSERT INTO skips (idPerson, date, para, reason) VALUES(?, ?, ?, ?)', (idy, finDate, 0, reason))
             conn.commit()
+            if reason == 5 and dayOfWeek != 6:
+                with open("timetable.json", "r", encoding="utf-8") as file:
+                    timetable = json.load(file)
+                daysPary = timetable[str(dayOfWeek)]
+                ballyMinus = len(list(daysPary.values()))
+                if ballyBack == -1:
+                    ballyMinus = -1
+                cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+                bally = cur.fetchall()[0][0] - (ballyMinus * 5) + (ballyBack * 5)
+                cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+                conn.commit()
+            elif dayOfWeek != 6:
+                with open("timetable.json", "r", encoding="utf-8") as file:
+                    timetable = json.load(file)
+                daysPary = timetable[str(dayOfWeek)]
+                ballyMinus = len(list(daysPary.values()))
+                if ballyBack == -1:
+                    ballyBack = ballyMinus
+                cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+                bally = cur.fetchall()[0][0] + (ballyBack * 5)
+                cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+                conn.commit()
         bot.send_message(message.chat.id, "Запись про период добавлена", reply_markup=basicMarkup)
         cur.close()
 
@@ -405,7 +460,7 @@ def regDate5(message, idy):
     end_of_year = datetime(year=2026, month=12, day=31, tzinfo=moscow_tz)
     user_date1 = date_obj1.replace(year=2026, tzinfo=moscow_tz)
     user_date2 = date_obj2.replace(year=2026, tzinfo=moscow_tz)
-    if not (today <= user_date1 <= end_of_year):
+    if not (today < user_date1 <= end_of_year):
         bot.send_message(message.chat.id, "Дата в недопустимом диапазоне!")
         deletePeriod(message, idy)
         return
@@ -419,19 +474,41 @@ def regDate5(message, idy):
     current_date = start_date
     while current_date <= end_date:
         finDate = current_date.strftime("%m-%d")
+        dayOfWeek = current_date.weekday()
         current_date += timedelta(days=1)
+        cur.execute('SELECT id FROM skips WHERE idPerson = ? AND date = ? AND reason = ? AND para = ?', (idy, finDate, 5, 0))
+        ballyBack = len(cur.fetchall())
+        if ballyBack != 0:
+            ballyBack = -1
+        else:
+            cur.execute('SELECT id FROM skips WHERE idPerson = ? AND date = ? AND reason = ?', (idy, finDate, 5))
+            ballyBack = len(cur.fetchall())
         cur.execute('DELETE FROM skips WHERE idPerson = ? AND date = ?', (idy, finDate))
         conn.commit()
+        if dayOfWeek != 6:
+            if ballyBack == -1:
+                with open("timetable.json", "r", encoding="utf-8") as file:
+                    timetable = json.load(file)
+                daysPary = timetable[str(dayOfWeek)]
+                ballyBack = len(list(daysPary.values()))
+            cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+            bally = cur.fetchall()[0][0] + (ballyBack * 5)
+            cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (bally, idy))
+            conn.commit()
+
     bot.send_message(message.chat.id, "Записи в этом периоде удалены", reply_markup=basicMarkup)
     cur.close()
 
 
 def personStat(message, idy):
     cur = conn.cursor()
+    cur.execute("SELECT points FROM groupmates WHERE id = ?", (idy, ))
+    bally = cur.fetchall()[0][0]
+    texty = f"Социальные баллы: {bally}\n"
     cur.execute("SELECT date, para FROM skips WHERE idPerson = ? ORDER BY date", (idy, ))
     listikSkipov = cur.fetchall()
     cur.close()
-    texty = "Даты указаны в формате ММ-ДД\n"
+    texty += "Даты указаны в формате ММ-ДД\n"
     listikPar = []
     for i in range(len(listikSkipov)):
         para = str(listikSkipov[i][1])
@@ -447,6 +524,60 @@ def personStat(message, idy):
                 texty += f"{listikSkipov[i][0]}: " + ",".join(listikPar) + '\n'
                 listikPar = []
     bot.send_message(message.chat.id, texty, reply_markup=basicMarkup)
+
+
+def pointsAdding(message, idy):
+    cur = conn.cursor()
+    cur.execute("SELECT nick FROM groupmates WHERE id = ?", (idy, ))
+    nicky = decrypt_value(cur.fetchall()[0][0])
+    cur.close()
+    if nicky in HIGH_ACCESS:
+        bot.send_message(message.chat.id, "Введи сообщение в формате: баллы фамилия сообщение", reply_markup=hide_keyboard)
+        bot.register_next_step_handler(message, punish, idy)
+
+
+def punish(message, idy):
+    cur = conn.cursor()
+    try:
+        punInfo = message.text.split(" ")
+        bally = int(punInfo.pop(0))
+        surn = punInfo.pop(0)
+        mes = " ".join(punInfo)
+        cur.execute("SELECT id, name FROM groupmates")
+        listikTemp = cur.fetchall()
+        idishnik = -1
+        for i in range(len(listikTemp)):
+            if decrypt_value(listikTemp[i][1]) == surn:
+                idishnik = listikTemp[i][0]
+                break
+        if idishnik == -1:
+            raise Exception("Нет такой фамилии")
+        cur.execute("SELECT id, points, userID_enc FROM groupmates WHERE id = ?", (idishnik, ))
+        listikTemp = cur.fetchall()
+        idyWhom = listikTemp[0][0]
+        pointsCur = listikTemp[0][1]
+        usId = decrypt_value(listikTemp[0][2])
+        cur.execute("UPDATE groupmates SET points = ? WHERE id = ?", (pointsCur + bally, idyWhom))
+        conn.commit()
+        bot.send_message(usId, f"{bally} баллов: " + mes)
+        bot.send_message(message.chat.id, "Успешно изменено социальное положение!", reply_markup=basicMarkup)
+        cur.close()
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Какая-то ошибка: {e}")
+        cur.close()
+        pointsAdding(message, idy)
+
+
+def socialRating(message):
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM groupmates ORDER BY points DESC") 
+    listikStud = cur.fetchall()
+    cur.close()
+    texty = ""
+    for i in range(len(listikStud)):
+        texty += f"{i + 1}. {decrypt_value(listikStud[i][0])}\n"
+    bot.send_message(message.chat.id, texty, reply_markup=basicMarkup)
+
 
 def boobs(message):
     with open("image.png", "rb") as photo:
